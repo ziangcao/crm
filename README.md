@@ -59,28 +59,32 @@ docker compose exec crm ./crm-seed
 
 推送 `main` 分支后，`.github/workflows/deploy.yml` 只构建 `linux/amd64` 和 `linux/arm64` 镜像，并发布到 `ghcr.io/<owner>/<repository>:latest` 与 `sha-<完整提交 SHA>`。在 GitHub Actions 的 `Publish CRM Image` 中确认 `publish` 成功后，再到服务器手动更新。数据库与附件保存在服务器 Docker 命名卷中，不会写入镜像或上传 GitHub。
 
-服务器首次部署前安装 Docker Engine 与 Compose 插件，将本仓库克隆到 `/opt/crm`，并创建仅保存在服务器上的配置文件：
+服务器首次部署前安装 Docker Engine 与 Compose 插件。从本机项目目录将部署文件传到服务器，不需要服务器访问 GitHub：
 
 ```bash
-sudo mkdir -p /opt/crm
-sudo chown "$USER":"$USER" /opt/crm
-git clone https://github.com/<owner>/<repository>.git /opt/crm
+ssh user@server 'mkdir -p /opt/crm/deploy /opt/crm/scripts'
+scp deploy/docker-compose.yml deploy/.env.example user@server:/opt/crm/deploy/
+scp scripts/update-self-hosted.sh user@server:/opt/crm/scripts/
+```
+
+在服务器创建仅保存在服务器上的配置文件：
+
+```bash
 cd /opt/crm
 cp deploy/.env.example .env
 chmod 600 .env
 ```
 
-编辑 `/opt/crm/.env`，将 `CRM_IMAGE` 设为自己的 `ghcr.io/<owner>/<repository>:latest`，并设置 `CRM_DB_PASSWORD`、`CRM_CONFIG_ENCRYPTION_KEY` 和线上域名。两个密钥可分别使用 `openssl rand -hex 32` 生成。私有仓库需要先为服务器配置仓库读取权限；私有 GHCR 镜像还需用具有 `read:packages` 权限的凭据在服务器执行 `docker login ghcr.io`。
+编辑 `/opt/crm/.env`，将 `CRM_IMAGE` 设为自己的 `ghcr.io/<owner>/<repository>:latest`，并设置 `CRM_DB_PASSWORD`、`CRM_CONFIG_ENCRYPTION_KEY` 和线上域名。两个密钥可分别使用 `openssl rand -hex 32` 生成。私有 GHCR 镜像还需用具有 `read:packages` 权限的凭据在服务器执行 `docker login ghcr.io`。
 
-首次启动以及后续更新都在服务器执行：
+首次启动以及后续镜像更新都在服务器执行：
 
 ```bash
 cd /opt/crm
-git pull --ff-only origin main
 bash scripts/update-self-hosted.sh
 ```
 
-脚本使用 `deploy/docker-compose.yml`、服务器上的 `.env` 和固定的 Compose 项目名 `crm`，依次拉取镜像、启动服务并检查 `/api/health`。如需使用其他配置文件，可传入绝对路径 `ENV_FILE` 或 `COMPOSE_FILE`。更新已有服务前先备份数据库和附件；不要执行 `docker compose down -v`。
+脚本使用 `deploy/docker-compose.yml`、服务器上的 `.env` 和固定的 Compose 项目名 `crm`，依次拉取镜像、启动服务并检查 `/api/health`。如需使用其他配置文件，可传入绝对路径 `ENV_FILE` 或 `COMPOSE_FILE`。部署文件有修改时，先从本机重新执行上面的 `scp` 命令。更新已有服务前先备份数据库和附件；不要执行 `docker compose down -v`。
 
 需要回滚时，将 `/opt/crm/.env` 中的 `CRM_IMAGE` 改为历史 `sha-<完整提交 SHA>`，再执行 `bash scripts/update-self-hosted.sh`。
 
