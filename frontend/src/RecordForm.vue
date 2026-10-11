@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Plus, Trash2, X } from 'lucide-vue-next'
 import { api, money } from './api'
 import type { CRMRecord, Field, LineItem, Module, SubtableRow, Value } from './types'
 import ReferenceInput from './ReferenceInput.vue'
+import { compressProductImage } from './productImages'
 
 const props = defineProps<{ module: Module; record?: CRMRecord; initial?: Record<string, Value> }>()
 const emit = defineEmits<{ close: []; saved: [record: CRMRecord] }>()
 const form = ref<Record<string, Value>>({}), items = ref<LineItem[]>([]), error = ref(''), busy = ref(false)
 const subtables = ref<Record<string, SubtableRow[]>>({})
+const productImages = ref<{ file: File; url: string }[]>([]), savedProduct = ref<CRMRecord>()
+const imageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+function clearProductImages() { productImages.value.forEach(image => URL.revokeObjectURL(image.url)); productImages.value = [] }
+onUnmounted(clearProductImages)
 function itemAmount(item: LineItem) { const base = Number(item.quantity) * Number(item.unit_price); const discounted = base * (1 - Number(item.discount_rate || 0) / 100); return Math.round(discounted * (1 + Number(item.tax_rate || 0) / 100) * 100) / 100 }
 const itemTotal = computed(() => items.value.reduce((sum, item) => sum + itemAmount(item), 0))
 onMounted(() => {
@@ -22,16 +27,41 @@ onMounted(() => {
 function addItem() { items.value.push({ product_id: '', specification: '', quantity: '1', unit_price: '0', discount_rate: '0', tax_rate: '0' }) }
 function selectProduct(index: number, product: CRMRecord) { items.value[index].unit_price = String(product.data.price); items.value[index].name = String(product.data.name) }
 function addSubtableRow(field: Field) { subtables.value[field.key].push(Object.fromEntries((field.columns || []).map(column => [column.key, '']))) }
+function chooseProductImages(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  if (files.length > 3 || files.some(file => !imageTypes.includes(file.type) || file.size > 5 * 1024 * 1024 || !file.size)) {
+    clearProductImages()
+    error.value = '每次最多选择 3 张 JPEG、PNG、WebP 或 GIF 图片，单张不超过 5 MB'
+  } else if (files.length) { clearProductImages(); productImages.value = files.map(file => ({ file, url: URL.createObjectURL(file) })); error.value = '' }
+  input.value = ''
+}
+function removeProductImage(index: number) {
+  const [image] = productImages.value.splice(index, 1)
+  if (image) URL.revokeObjectURL(image.url)
+}
 async function save() {
   if (busy.value) return
   busy.value = true; error.value = ''
+  let recordSaved = false
   try {
     const data = Object.fromEntries(Object.entries(form.value).filter(([key]) => { const field = props.module.fields.find(item => item.key === key); return !field?.read_only && field?.type !== 'formula' }))
     if (props.module.fields.some(f => f.type === 'items')) data.items = items.value
     for (const field of props.module.fields.filter(field => field.type === 'subtable')) data[field.key] = subtables.value[field.key]
-    const record = await api<CRMRecord>(`/records/${props.module.key}${props.record ? '/' + props.record.id : ''}`, props.record ? 'PUT' : 'POST', { data, ...(props.record ? { version: props.record.version } : {}) })
+    const previous = savedProduct.value || props.record
+    const record = await api<CRMRecord>(`/records/${props.module.key}${previous ? '/' + previous.id : ''}`, previous ? 'PUT' : 'POST', { data, ...(previous ? { version: previous.version } : {}) })
+    recordSaved = true
+    if (props.module.key === 'products') savedProduct.value = record
+    if (props.module.key === 'products' && productImages.value.length) {
+      const images = new FormData()
+      const files = await Promise.all(productImages.value.map(image => compressProductImage(image.file)))
+      files.forEach(file => images.append('files', file))
+      const response = await fetch(`/api/records/products/${record.id}/attachments`, { method: 'POST', credentials: 'same-origin', body: images })
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '图片上传失败')
+      clearProductImages()
+    }
     emit('saved', record)
-  } catch (e) { error.value = (e as Error).message }
+  } catch (e) { error.value = (recordSaved ? '产品已保存，但图片上传失败：' : '') + (e as Error).message }
   finally { busy.value = false }
 }
 </script>
@@ -75,6 +105,7 @@ async function save() {
               <input v-else v-model="form[field.key]" :type="field.type === 'money' || field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : field.type === 'email' ? 'email' : 'text'" :step="field.type === 'money' ? '0.01' : 'any'" :min="field.type === 'money' ? 0 : field.min" :max="field.max" :required="field.required" :disabled="field.read_only" :placeholder="'请输入' + field.label" maxlength="300"/>
             </label>
           </template>
+          <div v-if="module.key === 'products'" class="field full product-image-input"><span>产品图片（可选）</span><div class="product-image-upload"><label><span>{{ productImages.length ? '已选择 ' + productImages.length + ' 张，点击重新选择' : '选择图片（最多 3 张，单张不超过 5 MB）' }}</span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple :disabled="busy" @change="chooseProductImages"/></label><span class="product-image-upload-note">保存产品时上传</span></div><div v-if="productImages.length" class="product-image-grid"><div v-for="(image, index) in productImages" :key="image.url" class="product-image-card"><img :src="image.url" :alt="image.file.name"/><footer><span :title="image.file.name">{{ image.file.name }}</span><button type="button" class="icon-button danger" :disabled="busy" :aria-label="'移除图片' + image.file.name" @click="removeProductImage(index)"><Trash2 :size="15"/></button></footer></div></div></div>
           <p v-if="error" class="error-banner full" role="alert">{{ error }}</p>
         </div>
         <footer class="modal-footer"><span v-if="module.approvable" class="muted">保存为草稿，提交审批后生效</span><button type="button" class="button" :disabled="busy" @click="emit('close')">取消</button><button class="button primary" :disabled="busy">{{ busy ? '保存中…' : '保存' + module.label }}</button></footer>

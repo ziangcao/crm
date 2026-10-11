@@ -11,6 +11,10 @@ services:
       CRM_ALLOWED_ORIGINS: "${CRM_ALLOWED_ORIGINS:-}"
       CRM_FRONTEND: /app/frontend/dist
       CRM_UPLOAD_DIR: /app/uploads
+      CRM_GITHUB_IMAGE_OWNER: ${CRM_GITHUB_IMAGE_OWNER:-}
+      CRM_GITHUB_IMAGE_REPO: ${CRM_GITHUB_IMAGE_REPO:-}
+      CRM_GITHUB_IMAGE_BRANCH: ${CRM_GITHUB_IMAGE_BRANCH:-main}
+      CRM_GITHUB_IMAGE_TOKEN: ${CRM_GITHUB_IMAGE_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

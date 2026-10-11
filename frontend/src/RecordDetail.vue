@@ -5,6 +5,7 @@ import { api, dateTime, money, statusLabel, statusTone } from './api'
 import type { CRMRecord, Detail, FollowupComment, LineItem, Module, Page, SubtableRow, User } from './types'
 import FollowupPlans from './FollowupPlans.vue'
 import { hasModulePermission } from './permissions'
+import { compressProductImage } from './productImages'
 
 const props = defineProps<{ module: Module; recordId: string; user: User; modules: Module[]; revision: number }>()
 const emit = defineEmits<{ close: []; edit: [record: CRMRecord]; changed: []; 'open-record': [module: string, id: string]; create: [module: string, initial: Record<string, string>] }>()
@@ -13,6 +14,9 @@ const content = ref(''), method = ref('电话'), nextDate = ref(''), confirmActi
 const followupCommentDrafts = ref<Record<string, string>>({})
 type Attachment = { id: string; name: string; content_type: string; size: number; version: number; created_at: string }
 const attachments = ref<Attachment[]>([]), selectedFile = ref<File>(), attachmentBusy = ref(false)
+const productImageFiles = ref<File[]>([])
+const imageUploadStatus = ref('')
+const productImages = computed(() => props.module.key === 'products' ? attachments.value.filter(item => ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(item.content_type.toLowerCase())) : [])
 type OwnershipHistory = { id: string; previous_owner_id: string; previous_owner_name: string; owner_id: string; owner_name: string; operator_name: string; action: string; created_at: string }
 const ownershipHistory = ref<OwnershipHistory[]>([])
 const inWritableScope = computed(() => !!record.value && (props.user.role_id ? true : props.user.role !== 'sales' || (record.value.owner_id === props.user.id && !props.module.shared)))
@@ -36,7 +40,7 @@ async function load() {
   catch (e) { error.value = (e as Error).message }
 }
 onMounted(async () => { await load(); if (canAssign.value) users.value = await api<User[]>('/users') })
-watch(() => props.recordId, () => { tab.value = 'overview'; load() })
+watch(() => props.recordId, () => { tab.value = 'overview'; productImageFiles.value = []; imageUploadStatus.value = ''; load() })
 watch(() => props.revision, load)
 async function action(name: string) {
   if (!record.value || busy.value) return
@@ -134,6 +138,34 @@ async function removeFollowupComment(followupId: string, comment: FollowupCommen
   } catch (e) { error.value = (e as Error).message }
 }
 function chooseAttachment(event: Event) { selectedFile.value = (event.target as HTMLInputElement).files?.[0] }
+function chooseProductImages(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  imageUploadStatus.value = ''
+  if (files.length > 3 || files.some(file => !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) || file.size > 5 * 1024 * 1024 || !file.size)) {
+    productImageFiles.value = []
+    error.value = '每次最多选择 3 张 JPEG、PNG、WebP 或 GIF 图片，单张不超过 5 MB'
+  } else { productImageFiles.value = files; error.value = '' }
+  input.value = ''
+}
+async function uploadProductImages() {
+  if (!productImageFiles.value.length || attachmentBusy.value) return
+  attachmentBusy.value = true; error.value = ''
+  const count = productImageFiles.value.length
+  imageUploadStatus.value = `正在处理 ${count} 张图片，请勿重复操作…`
+  try {
+    const form = new FormData()
+    const files = await Promise.all(productImageFiles.value.map(compressProductImage))
+    imageUploadStatus.value = `正在上传 ${count} 张图片，请勿重复操作…`
+    files.forEach(file => form.append('files', file))
+    const response = await fetch(`/api/records/products/${props.recordId}/attachments`, { method: 'POST', credentials: 'same-origin', body: form })
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '图片上传失败')
+    productImageFiles.value = []
+    await load()
+    imageUploadStatus.value = `已成功上传 ${count} 张图片`
+  } catch (e) { error.value = (e as Error).message; imageUploadStatus.value = '图片上传失败，请查看上方错误提示' }
+  finally { attachmentBusy.value = false }
+}
 async function uploadAttachment() {
   if (!selectedFile.value || attachmentBusy.value) return
   attachmentBusy.value = true; error.value = ''
@@ -225,6 +257,7 @@ function printRecord() {
       <div v-if="approval" class="info-banner">此单据正在审批中，业务字段已锁定。<button class="text-button" @click="emit('close')">可前往审批中心处理</button></div>
       <nav class="detail-tabs"><button v-for="t in [{ key: 'overview', label: '基本信息' }, { key: 'followups', label: '跟进记录', count: record.followups.length }, ...(supportsPlans ? [{ key: 'plans', label: '跟进计划' }] : []), ...(['customers', 'leads'].includes(module.key) ? [{ key: 'ownership', label: '负责人历史', count: ownershipHistory.length }] : []), { key: 'related', label: '关联业务', count: record.related.length }, { key: 'attachments', label: '附件', count: attachments.length }, { key: 'approvals', label: '审批记录', count: record.approvals.length }]" :key="t.key" :class="{ active: tab === t.key }" @click="tab = t.key">{{ t.label }}<span v-if="t.count">{{ t.count }}</span></button></nav>
       <div class="detail-content">
+        <section v-if="tab === 'overview' && module.key === 'products'" class="product-image-section"><h3>产品图片</h3><div v-if="canWrite" class="product-image-upload"><label><span>{{ productImageFiles.length ? '已选择：' + productImageFiles.map(file => file.name).join('、') : '选择图片（最多 3 张，单张不超过 5 MB）' }}</span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple :disabled="attachmentBusy" @change="chooseProductImages"/></label><button class="button primary" :disabled="!productImageFiles.length || attachmentBusy" @click="uploadProductImages"><Upload :size="14"/>{{ imageUploadStatus && attachmentBusy ? '上传中…' : '上传图片' }}</button></div><div v-if="imageUploadStatus" class="info-banner" role="status">{{ imageUploadStatus }}</div><div v-if="!productImages.length" class="empty small">暂无产品图片</div><div v-else class="product-image-grid"><div v-for="item in productImages" :key="item.id" class="product-image-card"><a :href="'/api/attachments/' + item.id" target="_blank" rel="noreferrer"><img :src="'/api/attachments/' + item.id" :alt="item.name" loading="lazy"/></a><footer><span :title="item.name">{{ item.name }}</span><button v-if="canWrite" class="icon-button danger" :disabled="attachmentBusy" :aria-label="'删除图片' + item.name" @click="deleteAttachment(item.id)"><Trash2 :size="15"/></button></footer></div></div></section>
         <template v-if="tab === 'overview'"><div class="detail-fields"><template v-for="field in module.fields" :key="field.key"><div v-if="!['items','subtable'].includes(field.type)" :class="{ full: field.type === 'textarea' }"><label>{{ field.label }}</label><button v-if="field.type === 'reference' && record.data[field.key]" class="reference-link" @click="emit('open-record', field.module!, String(record.data[field.key]))">{{ value(field) }} <ArrowUpRight :size="13"/></button><p v-else>{{ value(field) }}</p></div></template></div><div v-for="field in module.fields.filter(field => field.type === 'subtable')" :key="field.key" class="detail-line-items"><h3>{{ field.label }}</h3><table><thead><tr><th v-for="column in field.columns || []" :key="column.key">{{ column.label }}</th></tr></thead><tbody><tr v-for="(row, index) in (record.data[field.key] as SubtableRow[] || [])" :key="index"><td v-for="column in field.columns || []" :key="column.key">{{ column.type === 'money' ? money(row[column.key]) : row[column.key] || '—' }}</td></tr></tbody></table></div><div v-if="record.data.items" class="detail-line-items"><h3>产品明细</h3><table><thead><tr><th>产品</th><th>规格</th><th>数量</th><th>单价</th><th>折扣</th><th>税率</th><th>含税小计</th></tr></thead><tbody><tr v-for="(item, index) in record.data.items as LineItem[]" :key="index"><td>{{ item.name }}</td><td>{{ item.specification || '—' }}</td><td>{{ item.quantity }}</td><td>{{ money(itemUnitPrice(item)) }}</td><td>{{ item.discount_rate || '0' }}%</td><td>{{ item.tax_rate || '0' }}%</td><td>{{ money(itemSubtotal(item)) }}</td></tr></tbody></table><div class="item-total">合计 <strong>{{ money(record.data.amount) }}</strong></div></div><div v-if="canAssign && ['customers', 'leads', 'tasks'].includes(module.key) && !record.data.converted_customer_id" class="assign-box"><h3>负责人分配</h3><p>客户分配会同步更新关联业务的负责人。</p><div><select v-model="assignee"><option value="">请选择负责人</option><option v-for="member in users.filter(u => u.active)" :key="member.id" :value="member.id">{{ member.name }}</option></select><button class="button" :disabled="!assignee || busy || assignee === record.owner_id" @click="action('assign')">确认分配</button></div></div></template>
         <template v-if="tab === 'followups'"><form v-if="canWrite" class="followup-form" @submit.prevent="followup"><h3><MessageSquare :size="16"/>记录一次新的进展</h3><textarea v-model="content" required maxlength="5000" placeholder="客户沟通了什么？下一步需要做什么？" rows="4"></textarea><div><select v-model="method" aria-label="跟进方式"><option v-for="v in ['电话','微信','邮件','拜访','会议','其他']" :key="v">{{ v }}</option></select><label>下次跟进<input v-model="nextDate" type="date"/></label><button class="button primary" :disabled="busy || !content.trim()">发布跟进</button></div></form><div v-if="!record.followups.length" class="empty"><MessageSquare :size="30"/><strong>还没有跟进记录</strong><span>记录客户需求，让团队协作更顺畅。</span></div><div v-for="f in record.followups" :key="f.id" class="followup-card"><header><b>{{ f.user_name }}</b><span class="badge blue">{{ f.method }}</span><time>{{ dateTime(f.created_at) }}</time></header><p>{{ f.content }}</p><small v-if="f.next_date">下次跟进：{{ f.next_date }}</small><section class="plan-comments"><b>协作评论</b><div v-if="!(f.comments || []).length" class="muted">暂无评论</div><div v-for="comment in f.comments || []" :key="comment.id" class="plan-comment"><strong>{{ comment.user_name }}</strong><span>{{ comment.content }}</span><time>{{ dateTime(comment.created_at) }}</time><button v-if="comment.user_id === user.id || ['admin', 'manager'].includes(user.role)" class="text-button" @click="editFollowupComment(f.id, comment)">编辑</button><button v-if="comment.user_id === user.id || ['admin', 'manager'].includes(user.role)" class="text-button danger" @click="removeFollowupComment(f.id, comment)">删除</button></div><form v-if="canWrite" @submit.prevent="addFollowupComment(f.id)"><textarea v-model="followupCommentDrafts[f.id]" required maxlength="2000" placeholder="添加协作评论" rows="2"/><button class="text-button">发表评论</button></form></section></div></template>
         <FollowupPlans v-if="tab === 'plans' && supportsPlans" :module="module" :record-id="record.id" :can-write="canWrite" :user-id="user.id" :manager="['admin', 'manager'].includes(user.role)" @changed="emit('changed')"/>

@@ -12,15 +12,16 @@ import (
 )
 
 type Config struct {
-	Address, Driver, DSN, RedisURL, RedisPrefix, Frontend, UploadDir string
-	WeComCorpID, WeComAgentID, WeComSecret, WeComOAuthRedirect       string
-	CookieSecure                                                     bool
-	AllowedOrigins                                                   []string
-	SessionTTL                                                       time.Duration
-	CustomerRecycleDays                                              int
-	IntegrationMock                                                  bool
-	IntegrationEndpoints, IntegrationTokens                          map[string]string
-	ConfigEncryptionKey                                              string
+	Address, Driver, DSN, RedisURL, RedisPrefix, Frontend, UploadDir       string
+	GitHubImageOwner, GitHubImageRepo, GitHubImageBranch, GitHubImageToken string
+	WeComCorpID, WeComAgentID, WeComSecret, WeComOAuthRedirect             string
+	CookieSecure                                                           bool
+	AllowedOrigins                                                         []string
+	SessionTTL                                                             time.Duration
+	CustomerRecycleDays                                                    int
+	IntegrationMock                                                        bool
+	IntegrationEndpoints, IntegrationTokens                                map[string]string
+	ConfigEncryptionKey                                                    string
 }
 
 func Load() (Config, error) {
@@ -36,6 +37,15 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("CRM_CUSTOMER_RECYCLE_DAYS 无效")
 	}
 	c := Config{Address: net.JoinHostPort(env("CRM_HOST", "127.0.0.1"), strconv.Itoa(port)), Driver: env("CRM_DB_DRIVER", "postgres"), DSN: os.Getenv("CRM_DB_DSN"), RedisURL: env("CRM_REDIS_URL", "redis://127.0.0.1:6379/0"), RedisPrefix: env("CRM_REDIS_PREFIX", "cordial:"), Frontend: env("CRM_FRONTEND", "frontend/dist"), UploadDir: env("CRM_UPLOAD_DIR", "backend/data/uploads"), WeComCorpID: os.Getenv("CRM_WECOM_CORP_ID"), WeComAgentID: os.Getenv("CRM_WECOM_AGENT_ID"), WeComSecret: os.Getenv("CRM_WECOM_SECRET"), WeComOAuthRedirect: os.Getenv("CRM_WECOM_OAUTH_REDIRECT_URL"), CookieSecure: os.Getenv("CRM_COOKIE_SECURE") == "1", SessionTTL: 12 * time.Hour, CustomerRecycleDays: recycleDays, ConfigEncryptionKey: os.Getenv("CRM_CONFIG_ENCRYPTION_KEY")}
+	c.GitHubImageOwner = os.Getenv("CRM_GITHUB_IMAGE_OWNER")
+	c.GitHubImageRepo = os.Getenv("CRM_GITHUB_IMAGE_REPO")
+	c.GitHubImageBranch = env("CRM_GITHUB_IMAGE_BRANCH", "main")
+	c.GitHubImageToken = os.Getenv("CRM_GITHUB_IMAGE_TOKEN")
+	if c.GitHubImageOwner != "" || c.GitHubImageRepo != "" || c.GitHubImageToken != "" {
+		if c.GitHubImageOwner == "" || c.GitHubImageRepo == "" || c.GitHubImageToken == "" {
+			return c, fmt.Errorf("GitHub 图片仓库配置需要同时提供 owner、repo 和 token")
+		}
+	}
 	c.IntegrationMock = os.Getenv("CRM_INTEGRATION_MOCK") == "1"
 	c.IntegrationEndpoints = map[string]string{"feishu": os.Getenv("CRM_FEISHU_WEBHOOK_URL"), "dingtalk": os.Getenv("CRM_DINGTALK_WEBHOOK_URL"), "sso": os.Getenv("CRM_SSO_DISCOVERY_URL"), "tax": os.Getenv("CRM_TAX_ADAPTER_URL"), "bank": os.Getenv("CRM_BANK_ADAPTER_URL"), "tender": os.Getenv("CRM_TENDER_ADAPTER_URL")}
 	c.IntegrationTokens = map[string]string{"feishu": os.Getenv("CRM_FEISHU_TOKEN"), "dingtalk": os.Getenv("CRM_DINGTALK_TOKEN"), "sso": os.Getenv("CRM_SSO_CLIENT_SECRET"), "tax": os.Getenv("CRM_TAX_ADAPTER_TOKEN"), "bank": os.Getenv("CRM_BANK_ADAPTER_TOKEN"), "tender": os.Getenv("CRM_TENDER_ADAPTER_TOKEN")}

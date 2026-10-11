@@ -50,6 +50,10 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	var imageStorage usecase.AttachmentStorage
+	if c.GitHubImageRepo != "" {
+		imageStorage = repo.NewGitHubImageStorage(c.GitHubImageOwner, c.GitHubImageRepo, c.GitHubImageBranch, c.GitHubImageToken)
+	}
 	passwords := controller.Passwords{}
 	auth := usecase.NewAuth(repository, passwords, controller.Tokens{}, c.SessionTTL)
 	users := usecase.NewUser(repository, passwords)
@@ -79,8 +83,8 @@ func run(log *slog.Logger) error {
 	}
 	reminders := usecase.NewFollowupReminder(repository)
 	recycler := usecase.NewCustomerRecycle(repository, records)
-	router := controller.New(auth, users, usecase.NewAPIKey(repository, passwords, controller.Tokens{}), usecase.NewAgent(repository), usecase.NewDashboardConfig(repository), integrationSettings, records, usecase.NewApproval(repository, notifications), usecase.NewAudit(repository), usecase.NewSystem(repository), usecase.NewAttachment(repository, attachments), notifications, usecase.NewFollowupPlan(repository), usecase.NewApprovalFlow(repository), weComClient, integrations, c.CookieSecure, c.Frontend).Router()
-	server := &http.Server{Addr: c.Address, Handler: router, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	router := controller.New(auth, users, usecase.NewAPIKey(repository, passwords, controller.Tokens{}), usecase.NewAgent(repository), usecase.NewDashboardConfig(repository), integrationSettings, records, usecase.NewApproval(repository, notifications), usecase.NewAudit(repository), usecase.NewSystem(repository), usecase.NewAttachment(repository, attachments, imageStorage), notifications, usecase.NewFollowupPlan(repository), usecase.NewApprovalFlow(repository), weComClient, integrations, c.CookieSecure, c.Frontend).Router()
+	server := &http.Server{Addr: c.Address, Handler: router, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second}
 	signals, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go runFollowupReminders(signals, log, reminders)
