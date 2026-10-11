@@ -1,0 +1,9 @@
+.venv
+frontend/node_modules
+backend/data
+**/__pycache__
+**/*.pyc
+**/*.tsbuildinfo
+.git
+.env
+docs

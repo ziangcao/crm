@@ -1,0 +1,8 @@
+.sidebar-footer::after {
+  content: "Cordys CRM · Copyright © 2026 FIT2CLOUD";
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  font-size: 9px;
+  color: #9aa6b9;
+}

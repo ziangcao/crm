@@ -1,0 +1,38 @@
+services:
+  crm:
+    image: ${CRM_IMAGE:?请配置 CRM_IMAGE}
+    env_file:
+      - ${CRM_ENV_FILE:-.env}
+    ports:
+      - "127.0.0.1:${CRM_BIND_PORT:-8000}:8000"
+    environment:
+      CRM_HOST: 0.0.0.0
+      CRM_DB_DRIVER: postgres
+      CRM_DB_DSN: postgres://crm:${CRM_DB_PASSWORD:?请配置 CRM_DB_PASSWORD}@postgres:5432/crm?sslmode=disable
+      CRM_FRONTEND: /app/frontend/dist
+      CRM_UPLOAD_DIR: /app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - crm-uploads:/app/uploads
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: crm
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: ${CRM_DB_PASSWORD:?请配置 CRM_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d crm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    volumes:
+      - crm-postgres:/var/lib/postgresql/data
+
+volumes:
+  crm-postgres:
+  crm-uploads:
