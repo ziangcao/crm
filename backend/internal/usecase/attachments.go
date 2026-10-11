@@ -65,7 +65,8 @@ func (u *AttachmentUseCase) Upload(ctx context.Context, input UploadAttachmentIn
 	}
 	item := entity.Attachment{ID: entity.NewID(), RecordID: record.ID, Module: record.Module, UserID: input.Actor.ID, Name: name, ContentType: strings.TrimSpace(input.ContentType), Version: 1, Size: int64(len(input.Content)), CreatedAt: time.Now().UTC()}
 	if u.imageStorage != nil && item.Module == "products" && (item.ContentType == "image/jpeg" || item.ContentType == "image/png" || item.ContentType == "image/webp" || item.ContentType == "image/gif") {
-		item.ID = "gh_" + item.ID
+		extension := map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}[item.ContentType]
+		item.ID = "gh_" + item.ID + extension
 	}
 	items, err := u.repo.ListAttachments(ctx, record.ID)
 	if err != nil {

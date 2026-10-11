@@ -21,7 +21,7 @@ func TestGitHubImageStorageSaveReadDelete(t *testing.T) {
 	var calls []string
 	storage.client.Transport = githubTransport(func(request *http.Request) (*http.Response, error) {
 		calls = append(calls, request.Method+" "+request.URL.Path)
-		if request.URL.Path != "/repos/ziangcao/crm-product-images/contents/products/gh_123" {
+		if request.URL.Path != "/repos/ziangcao/crm-product-images/contents/products/gh_123.png" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		if request.Method == http.MethodGet && request.URL.Query().Get("ref") != "main" {
@@ -65,18 +65,18 @@ func TestGitHubImageStorageSaveReadDelete(t *testing.T) {
 		return response, nil
 	})
 	ctx := context.Background()
-	if err := storage.Save(ctx, "gh_123", []byte("picture")); err != nil {
+	if err := storage.Save(ctx, "gh_123.png", []byte("picture")); err != nil {
 		t.Fatal(err)
 	}
-	content, err := storage.Read(ctx, "gh_123")
+	content, err := storage.Read(ctx, "gh_123.png")
 	if err != nil || string(content) != "picture" {
 		t.Fatalf("read: %q, %v", content, err)
 	}
-	if err := storage.Delete(ctx, "gh_123"); err != nil {
+	if err := storage.Delete(ctx, "gh_123.png"); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		content, err = storage.Read(ctx, "gh_123")
+		content, err = storage.Read(ctx, "gh_123.png")
 		if err != nil || string(content) != "picture" {
 			t.Fatalf("read after delete: %q, %v", content, err)
 		}
