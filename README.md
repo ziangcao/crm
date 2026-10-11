@@ -55,47 +55,34 @@ docker compose exec crm ./crm-seed
 
 首次执行会创建演示管理员 `demo`，密码为 `DemoPass123`，并写入客户、线索、商机、产品、报价、合同、订单、发票、回款及任务等关联记录。重复执行只补齐缺失的演示记录，不会清空或覆盖已有业务数据。
 
-### GitHub 自动部署
+### GitHub 构建与服务器更新
 
-项目包含 `.github/workflows/deploy.yml`。推送 `main` 分支后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 镜像，推送 `ghcr.io/<owner>/<repository>:latest` 与不可变的 `sha-<commit>` 标签，再通过 SSH 使用该 SHA 镜像更新生产服务器。数据库与附件保存在服务器 Docker 命名卷中，不会写入镜像或上传 GitHub。
+推送 `main` 分支后，`.github/workflows/deploy.yml` 只构建 `linux/amd64` 和 `linux/arm64` 镜像，并发布到 `ghcr.io/<owner>/<repository>:latest` 与 `sha-<完整提交 SHA>`。在 GitHub Actions 的 `Publish CRM Image` 中确认 `publish` 成功后，再到服务器手动更新。数据库与附件保存在服务器 Docker 命名卷中，不会写入镜像或上传 GitHub。
 
-服务器首次部署前安装 Docker Engine 与 Compose 插件，并执行：
+服务器首次部署前安装 Docker Engine 与 Compose 插件，将本仓库克隆到 `/opt/crm`，并创建仅保存在服务器上的配置文件：
 
 ```bash
 sudo mkdir -p /opt/crm
 sudo chown "$USER":"$USER" /opt/crm
-cp deploy/.env.example /opt/crm/.env
-chmod 600 /opt/crm/.env
+git clone https://github.com/<owner>/<repository>.git /opt/crm
+cd /opt/crm
+cp deploy/.env.example .env
+chmod 600 .env
 ```
 
-编辑 `/opt/crm/.env`，至少设置 `CRM_DB_PASSWORD`、`CRM_CONFIG_ENCRYPTION_KEY`、线上域名和初始 `CRM_IMAGE`。两个密钥可分别使用 `openssl rand -hex 32` 生成。私有 GHCR 镜像还需在服务器执行一次登录，使用仅含 `read:packages` 权限的 GitHub PAT：
+编辑 `/opt/crm/.env`，将 `CRM_IMAGE` 设为自己的 `ghcr.io/<owner>/<repository>:latest`，并设置 `CRM_DB_PASSWORD`、`CRM_CONFIG_ENCRYPTION_KEY` 和线上域名。两个密钥可分别使用 `openssl rand -hex 32` 生成。私有仓库需要先为服务器配置仓库读取权限；私有 GHCR 镜像还需用具有 `read:packages` 权限的凭据在服务器执行 `docker login ghcr.io`。
 
-```bash
-echo '<GitHub PAT>' | docker login ghcr.io -u '<GitHub 用户名>' --password-stdin
-```
-
-在 GitHub 仓库的 `Settings → Secrets and variables → Actions` 中配置：
-
-| 类型 | 名称 | 用途 |
-| --- | --- | --- |
-| Secret | `DEPLOY_HOST` | 生产服务器域名或 IP |
-| Secret | `DEPLOY_USER` | 具有 Docker 权限的 SSH 用户 |
-| Secret | `DEPLOY_SSH_KEY` | 对应服务器部署公钥的私钥 |
-| Secret | `DEPLOY_KNOWN_HOSTS` | 预先核验的服务器 host key，可由 `ssh-keyscan -p 22 <主机>` 获取后核对指纹 |
-| Variable | `DEPLOY_PORT` | SSH 端口，默认 `22` |
-| Variable | `DEPLOY_PATH` | 部署目录，默认 `/opt/crm` |
-
-建议为 GitHub `production` Environment 开启分支保护。配置完成后执行普通的 `git push origin main` 即会自动发布。Actions 会覆盖服务器部署目录中的 `docker-compose.yml`，但保留 `.env`、数据库卷和附件卷。
-
-验证线上状态：
+首次启动以及后续更新都在服务器执行：
 
 ```bash
 cd /opt/crm
-docker compose ps
-curl -fsS http://127.0.0.1:8000/api/health
+git pull --ff-only origin main
+bash scripts/update-self-hosted.sh
 ```
 
-需要回滚时，将 `/opt/crm/.env` 中的 `CRM_IMAGE` 改为历史 `sha-<完整提交 SHA>`，再执行 `docker compose pull crm && docker compose up -d crm`。不要执行 `docker compose down -v`。
+脚本使用 `deploy/docker-compose.yml`、服务器上的 `.env` 和固定的 Compose 项目名 `crm`，依次拉取镜像、启动服务并检查 `/api/health`。如需使用其他配置文件，可传入绝对路径 `ENV_FILE` 或 `COMPOSE_FILE`。更新已有服务前先备份数据库和附件；不要执行 `docker compose down -v`。
+
+需要回滚时，将 `/opt/crm/.env` 中的 `CRM_IMAGE` 改为历史 `sha-<完整提交 SHA>`，再执行 `bash scripts/update-self-hosted.sh`。
 
 ## 已实现的流程
 
