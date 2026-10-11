@@ -19,7 +19,7 @@ services:
       - crm-uploads:/app/uploads
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17
     environment:
       POSTGRES_DB: crm
       POSTGRES_USER: crm
